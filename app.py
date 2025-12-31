@@ -28,7 +28,7 @@ except ImportError:
 # ==========================================
 # [설정] 페이지 기본 설정
 # ==========================================
-st.set_page_config(page_title="열정피디 AI 유튜브 대본 구조 분석기 (Pro)", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="이미지 생성기", layout="wide", page_icon="🎨")
 
 # 파일 저장 경로 설정
 BASE_PATH = "./web_result_files"
@@ -237,6 +237,49 @@ def split_script_by_time(script, chars_per_chunk=100):
     if current_chunk:
         chunks.append(current_chunk.strip())
     return chunks
+
+def parse_numbered_script(script):
+    """
+    번호(1. 2. 3.)로 분할된 대본을 파싱하여 씬 리스트로 반환.
+    줄바꿈을 제거하고 문장을 조화롭게 연결합니다.
+    """
+    import re
+
+    scenes = []
+    lines = script.strip().split('\n')
+    current_scene_lines = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # 새로운 씬 시작인지 확인 (숫자 + 점으로 시작)
+        match = re.match(r'^(\d+)\.(.*)$', line)
+        if match:
+            # 이전 씬이 있으면 저장
+            if current_scene_lines:
+                scene_text = ' '.join(current_scene_lines)
+                # 연속 공백 제거
+                scene_text = re.sub(r'\s+', ' ', scene_text).strip()
+                if scene_text:
+                    scenes.append(scene_text)
+
+            # 새 씬 시작 (번호 뒤의 내용)
+            rest = match.group(2).strip()
+            current_scene_lines = [rest] if rest else []
+        else:
+            # 현재 씬에 라인 추가
+            current_scene_lines.append(line)
+
+    # 마지막 씬 저장
+    if current_scene_lines:
+        scene_text = ' '.join(current_scene_lines)
+        scene_text = re.sub(r'\s+', ' ', scene_text).strip()
+        if scene_text:
+            scenes.append(scene_text)
+
+    return scenes
 
 def make_filename(scene_num, text_chunk):
     clean_line = text_chunk.replace("\n", " ").strip()
@@ -726,9 +769,8 @@ with st.sidebar:
     st.info(f"✅ 선택 모델: `{SELECTED_IMAGE_MODEL}`")
     
     st.markdown("---")
-    st.subheader("⏱️ 장면 분할 설정")
-    chunk_duration = st.slider("한 장면당 지속 시간 (초)", 5, 60, 20, 5)
-    chars_limit = chunk_duration * 8 
+    st.subheader("📝 대본 분할 안내")
+    st.info("대본을 번호(1. 2. 3.)로 분할해서 입력하세요. 각 번호가 하나의 씬이 됩니다.") 
     
     st.markdown("---")
     
@@ -830,8 +872,8 @@ with st.sidebar:
 # ==========================================
 # [UI] 메인 화면 1: 대본 구조화 및 생성
 # ==========================================
-st.title("📺 AI 유튜브 대본 구조 분석기 (Pro)")
-st.caption("구조 분석 ➡️ 롱폼 대본 생성(병렬 처리) ➡️ 이미지 생성 ➡️ TTS 오디오 ➡️ 비디오 생성(Zoom 효과)")
+st.title("🎨 이미지 생성기")
+st.caption("번호로 분할된 대본(1. 2. 3.)을 입력하면 씬별 이미지를 생성합니다.")
 
 # 세션 초기화
 if 'structured_content' not in st.session_state:
@@ -1027,8 +1069,8 @@ if st.session_state['structured_content']:
 # [수정된 UI] 메인 화면 3: 이미지 생성
 # ==========================================
 st.divider()
-st.title("🎬 AI 씬(장면) 생성기 (Pro)")
-st.caption(f"완성된 대본을 넣으면 장면별 이미지를 생성합니다. | 🎨 Model: {SELECTED_IMAGE_MODEL}")
+st.title("🖼️ 씬별 이미지 생성")
+st.caption(f"번호(1. 2. 3.)로 분할된 대본을 넣으면 각 씬에 맞는 이미지를 생성합니다. | 🎨 Model: {SELECTED_IMAGE_MODEL}")
 
 st.subheader("📌 전체 영상 테마(제목) 설정")
 st.caption("이미지 생성 시 이 제목이 '전체적인 분위기 기준'이 됩니다.")
@@ -1170,9 +1212,22 @@ if 'section_scripts' in st.session_state and st.session_state['section_scripts']
             st.rerun()
 
 script_input = st.text_area(
-    "📜 이미지로 만들 대본 입력", 
-    height=300, 
-    placeholder="위 버튼을 눌러 대본을 가져오거나, 직접 붙여넣으세요...",
+    "📜 번호로 분할된 대본 입력 (1. 2. 3. 형태)",
+    height=300,
+    placeholder="""예시:
+1.하지만 영원할 것 같았던
+이 거대한 제국은 어느 순간부터
+거리에 하나둘씩 간판을 내리기 시작하더니
+마치 신기루처럼 사라져버렸습니다
+
+2.오백 개가 넘는 매장이
+순식간에 증발해 버린 진짜 이유는,
+외부의 적이 아닌 내부의 가족,
+바로 부부의 전쟁 때문이었습니다
+
+3.한때 대한민국 요식업 프랜차이즈의 신화였으나
+지금은 오너 리스크의 가장 끔찍한 교과서로 남게 된
+비운의 브랜드...""",
     key="image_gen_input"
 )
 
@@ -1207,11 +1262,16 @@ if start_btn:
         status_box = st.status("작업 진행 중...", expanded=True)
         progress_bar = st.progress(0)
         
-        # 1. 대본 분할
-        status_box.write(f"✂️ 대본 분할 중...")
-        chunks = split_script_by_time(script_input, chars_per_chunk=chars_limit)
+        # 1. 대본 분할 (번호 기반)
+        status_box.write(f"✂️ 번호(1. 2. 3.)로 분할된 대본 파싱 중...")
+        chunks = parse_numbered_script(script_input)
         total_scenes = len(chunks)
-        status_box.write(f"✅ {total_scenes}개 장면으로 분할 완료.")
+
+        if total_scenes == 0:
+            status_box.update(label="⚠️ 번호로 분할된 씬을 찾을 수 없습니다. (예: 1.내용 2.내용)", state="error")
+            st.stop()
+
+        status_box.write(f"✅ {total_scenes}개 씬으로 파싱 완료.")
         
         current_video_title = st.session_state.get('video_title', "").strip()
         if not current_video_title:
