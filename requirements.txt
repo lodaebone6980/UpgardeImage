@@ -1,4 +1,5 @@
 streamlit
+audioop-lts
 requests
 Pillow
 google-genai
